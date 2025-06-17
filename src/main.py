@@ -1,84 +1,97 @@
-import os
 import cv2
-from procesador import Procesador
-from clasificador import Clasificador
+import numpy as np
+from skimage.measure import label
 
-class AnalizadorJeroglificos:
+# Diccionario que relaciona cada jeroglífico con su número de espacios internos
+diccionario_jeroglificos = {
+    "A": 1,  # Ankh (Cruz egipcia)
+    "J": 3,  # Wedjat (Ojo de Horus)
+    "D": 5,  # Djed (Pilar de la estabilidad)
+    "S": 4,  # Scarab (Escarabajo)
+    "W": 0,  # Was (Cetro de poder)
+    "K": 2,  # Akhet (Horizonte)
+}
+
+
+def decifrar_jeroglifico(mascara_jeroglifico):
     """
-    Clase principal que coordina el procesamiento y clasificación de imágenes con jeroglíficos.
+    Identifica un jeroglífico basado en el número de espacios internos que contiene.
+    
+    Args:
+        mascara_jeroglifico (numpy.ndarray): Imagen binaria que representa el jeroglífico aislado
+    
+    Returns:
+        str: Letra que representa el jeroglífico o None si no se encuentra coincidencia
     """
+    # Invertir la máscara para detectar espacios internos (los blancos se convierten en negros y viceversa)
+    mascara_invertida = cv2.bitwise_not(mascara_jeroglifico)
     
-    def __init__(self, input_dir='input', output_dir='output'):
-        """
-        Inicializa el analizador con los directorios de entrada y salida.
-        
-        Args:
-            input_dir (str): Directorio donde se encuentran las imágenes a procesar.
-            output_dir (str): Directorio donde se guardarán los resultados.
-        """
-        self.input_dir = input_dir
-        self.output_dir = output_dir
-        self.procesador = Procesador()
-        self.clasificador = Clasificador()
-        
-        # Crear directorios si no existen
-        os.makedirs(self.input_dir, exist_ok=True)
-        os.makedirs(self.output_dir, exist_ok=True)
+    # Etiquetar componentes conectados en la imagen invertida
+    componentes_etiquetados = label(mascara_invertida > 0, connectivity=2)
     
-    def procesar_imagenes(self):
-        """
-        Procesa todas las imágenes válidas en el directorio de entrada y genera los resultados.
-        """
-        resultados = {}
-        
-        # Obtener lista de imágenes válidas
-        imagenes = [f for f in os.listdir(self.input_dir) 
-                   if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        
-        if not imagenes:
-            print(f"No se encontraron imágenes válidas en {self.input_dir}")
-            return
-        
-        print(f"Procesando {len(imagenes)} imagen(es)...")
-        
-        for imagen_nombre in imagenes:
-            imagen_path = os.path.join(self.input_dir, imagen_nombre)
-            
-            try:
-                # Procesar imagen
-                caracteristicas = self.procesador.procesar_imagen(imagen_path)
-                
-                # Clasificar jeroglíficos
-                letras = self.clasificador.clasificar(caracteristicas)
-                
-                # Ordenar alfabéticamente y guardar resultado
-                letras_ordenadas = sorted(letras)
-                resultados[imagen_nombre] = ''.join(letras_ordenadas)
-                
-                print(f"{imagen_nombre}: {len(letras)} jeroglíficos encontrados")
-                
-            except Exception as e:
-                print(f"Error al procesar {imagen_nombre}: {str(e)}")
-                continue
-        
-        # Guardar resultados en archivo
-        self._guardar_resultados(resultados)
+    # Calcular espacios internos (excluyendo el fondo exterior)
+    num_componentes = np.max(componentes_etiquetados)  # Número total de componentes
+    espacios_internos = num_componentes - 1  # Restamos 1 para excluir el fondo
     
-    def _guardar_resultados(self, resultados):
-        """
-        Guarda los resultados en un archivo de texto en el directorio de salida.
+    # Buscar coincidencia en el diccionario
+    for simbolo, cantidad_espacios in diccionario_jeroglificos.items():
+        if cantidad_espacios == espacios_internos:
+            return simbolo
+    return None
+
+
+def procesar_imagen(imagen_binaria):
+    """
+    Procesa una imagen binaria para identificar y decodificar todos los jeroglíficos presentes.
+    
+    Args:
+        imagen_binaria (numpy.ndarray): Imagen binaria donde los jeroglíficos son regiones blancas
+    
+    Returns:
+        str: Cadena concatenada con los jeroglíficos identificados, ordenados alfabéticamente
+    """
+    # Etiquetar componentes conectados en la imagen binaria
+    imagen_etiquetada = label(imagen_binaria > 0, connectivity=2)
+    total_jeroglificos = np.max(imagen_etiquetada)  # Número de jeroglíficos encontrados
+    
+    jeroglificos_detectados = []
+    
+    # Procesar cada jeroglífico individualmente
+    for indice in range(1, total_jeroglificos + 1):
+        # Crear máscara para el jeroglífico actual
+        mascara_jeroglifico = np.where(imagen_etiquetada == indice, 255, 0).astype(np.uint8)
         
-        Args:
-            resultados (dict): Diccionario con los resultados por imagen.
-        """
-        output_path = os.path.join(self.output_dir, 'resultados.txt')
-        
-        with open(output_path, 'w') as f:
-            for imagen, letras in resultados.items():
-                f.write(f"{imagen}: {letras}\n")
-        
-        print(f"Resultados guardados en {output_path}")
+        # Decodificar el jeroglífico
+        letra_jeroglifico = decifrar_jeroglifico(mascara_jeroglifico)
+        if letra_jeroglifico:
+            jeroglificos_detectados.append(letra_jeroglifico)
+    
+    # Ordenar alfabéticamente y generar cadena final
+    jeroglificos_detectados.sort()
+    return "".join(jeroglificos_detectados)
+
 
 if __name__ == "__main__":
-    analizador = AnalizadorJeroglificos()
-    analizador.procesar_imagenes()
+    # Procesar primera imagen de ejemplo
+    archivo_entrada = "input/figura1.jpg"
+    imagen_gris = cv2.imread(archivo_entrada, cv2.IMREAD_GRAYSCALE)
+    _, imagen_binaria = cv2.threshold(imagen_gris, 127, 255, cv2.THRESH_BINARY_INV)
+    
+    resultado = procesar_imagen(imagen_binaria)
+    print(resultado)
+    
+    # Procesar segunda imagen de ejemplo
+    archivo_entrada = "input/figura2.png"
+    imagen_gris = cv2.imread(archivo_entrada, cv2.IMREAD_GRAYSCALE)
+    _, imagen_binaria = cv2.threshold(imagen_gris, 127, 255, cv2.THRESH_BINARY_INV)
+    
+    resultado = procesar_imagen(imagen_binaria)
+    print(resultado)
+
+    # Procesar tercera imagen de ejemplo
+    archivo_entrada = "input/figura3.png"
+    imagen_gris = cv2.imread(archivo_entrada, cv2.IMREAD_GRAYSCALE)
+    _, imagen_binaria = cv2.threshold(imagen_gris, 127, 255, cv2.THRESH_BINARY_INV)
+    
+    resultado = procesar_imagen(imagen_binaria)
+    print(resultado)
